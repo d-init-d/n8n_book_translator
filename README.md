@@ -43,7 +43,7 @@ Bạn chỉ cần thực hiện bước này một lần duy nhất khi mới t�
 
 1. **Tải dự án:** Clone repository hoặc tải file ZIP về máy và giải nén.  
 2. **Chạy file Setup:**  
-   * Click đúp vào file Setup\_n8n\_book\_translator.bat.  
+   * Chạy file Setup\_n8n\_book\_translator.bat.  
    * Cửa sổ cài đặt sẽ hiện ra. Script sẽ tự động kiểm tra máy bạn thiếu thành phần nào (Node.js, Pandoc, Ollama) và hỏi bạn có muốn cài đặt không.  
    * *Nhập y (Yes) và nhấn Enter để đồng ý cài đặt.*  
 3. **Chờ đợi:** Script sẽ tự động tải Model AI (mặc định là qwen3:14b). Vui lòng không tắt mạng.
