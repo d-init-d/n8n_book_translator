@@ -1,0 +1,494 @@
+{
+  "name": "Book translator portable",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerOn": "folder",
+        "path": "D:/N8n_book_translator/Input",
+        "events": [
+          "add"
+        ],
+        "options": {}
+      },
+      "type": "n8n-nodes-base.localFileTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1536,
+        -32
+      ],
+      "id": "e577a657-1d91-43b1-8966-8dd503029926",
+      "name": "Local File Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Lấy dữ liệu file gốc\nconst binaryData = items[0].binary.data;\nconst fullText = Buffer.from(binaryData.data, 'base64').toString('utf-8');\nconst totalLen = fullText.length;\n\n// --- CẤU HÌNH ---\nconst HEAD_SIZE = 4000;\nconst MID_SIZE = 3000;\nconst TAIL_SIZE = 3000;\n// Danh sách các ký tự an toàn để cắt (Ưu tiên dấu câu)\nconst SAFE_CHARS = ['.', ',', '!', '?', ';', '\\n', '”', '\"'];\n// ----------------\n\n// Hàm tìm điểm cắt an toàn (Lùi lại từ điểm dự kiến)\nfunction findSafeCutBackwards(text, limitIndex) {\n    // Lùi lại tối đa 500 ký tự để tìm dấu câu\n    for (let i = 0; i < 500; i++) {\n        const idx = limitIndex - i;\n        if (idx < 0) return limitIndex;\n        \n        // Nếu gặp dấu câu -> Cắt ngay sau nó\n        if (SAFE_CHARS.includes(text[idx])) {\n            return idx + 1; \n        }\n    }\n    // Nếu đen đủi không có dấu câu nào -> Đành cắt ở dấu cách gần nhất\n    return text.lastIndexOf(' ', limitIndex);\n}\n\n// Hàm tìm điểm bắt đầu an toàn (Tiến tới từ điểm dự kiến)\nfunction findSafeCutForward(text, startIndex) {\n    // Tiến tới tối đa 500 ký tự\n    for (let i = 0; i < 500; i++) {\n        const idx = startIndex + i;\n        if (idx >= text.length) return startIndex;\n        \n        // Nếu gặp dấu câu -> Bắt đầu đoạn mới sau dấu câu đó\n        if (SAFE_CHARS.includes(text[idx])) {\n            return idx + 1;\n        }\n    }\n    return text.indexOf(' ', startIndex) + 1;\n}\n\nlet combinedSample = \"\";\n\nif (totalLen <= (HEAD_SIZE + MID_SIZE + TAIL_SIZE)) {\n    combinedSample = fullText;\n} else {\n    // 1. KHÚC ĐẦU\n    // Cắt tại dấu câu gần mốc 4000 nhất\n    const safeHeadEnd = findSafeCutBackwards(fullText, HEAD_SIZE);\n    combinedSample += \"--- [PHẦN MỞ ĐẦU] ---\\n\" + fullText.substring(0, safeHeadEnd) + \"\\n\\n\";\n\n    // 2. KHÚC GIỮA\n    const midPoint = Math.floor(totalLen / 2);\n    // Tìm điểm bắt đầu an toàn (sau dấu phẩy/chấm)\n    const safeMidStart = findSafeCutForward(fullText, midPoint);\n    // Tìm điểm kết thúc an toàn\n    const safeMidEnd = findSafeCutBackwards(fullText, safeMidStart + MID_SIZE);\n    \n    combinedSample += \"--- [PHẦN GIỮA TRUYỆN] ---\\n... \" + fullText.substring(safeMidStart, safeMidEnd) + \" ...\\n\\n\";\n\n    // 3. KHÚC CUỐI\n    const startTail = totalLen - TAIL_SIZE;\n    // Tìm điểm bắt đầu an toàn\n    const safeTailStart = findSafeCutForward(fullText, startTail);\n    \n    combinedSample += \"--- [PHẦN KẾT THÚC] ---\\n... \" + fullText.substring(safeTailStart, totalLen);\n}\n\nreturn [{\n    json: {\n        sample_text: combinedSample,\n        total_length: totalLen\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        -48
+      ],
+      "id": "48d4d52a-7963-4e62-8d8d-49ce8a010410",
+      "name": "Lấy mẫu"
+    },
+    {
+      "parameters": {
+        "fileSelector": "={{ $json.path.replace(/\\\\/g, '/') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        -768,
+        -48
+      ],
+      "id": "77b763f8-5960-4828-9291-607ad072e502",
+      "name": "Đọc nội dung"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Lấy kết quả từ AI (Sửa để nhận từ HTTP Request)\nconst response = $input.first().json.message;\nconst aiText = response ? response.content : \"\";\nconst genre = aiText.trim().toUpperCase();\n\n// KHO TÀNG KHẨU QUYẾT\nconst prompts = {\n  \"KIEMHIEP\": \"Bạn là dịch giả kiếm hiệp lão luyện. Dùng từ Hán Việt (huynh, đệ, tại hạ...), văn phong hào hùng, cổ trang. Chiêu thức giữ nguyên âm Hán Việt.\",\n  \"NGONTINH\": \"Bạn là dịch giả ngôn tình. Văn phong lãng mạn, nhẹ nhàng, ướt át. Xưng hô Anh - Em hoặc Chàng - Nàng tùy ngữ cảnh.\",\n  \"KINHDOANH\": \"Bạn là chuyên gia kinh tế. Dịch văn phong trang trọng, chuyên nghiệp, dùng thuật ngữ chính xác.\",\n  \"KHAC\": \"Bạn là một dịch giả chuyên nghiệp. Hãy dịch trôi chảy, tự nhiên, sát nghĩa gốc.\"\n};\n\n// Chọn prompt\nconst selectedPrompt = prompts[genre] || prompts[\"KHAC\"];\n\nreturn [{\n  json: {\n    system_prompt: selectedPrompt,\n    detected_genre: genre\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        64,
+        -48
+      ],
+      "id": "a9171907-6dca-4134-9333-5469b06faf1b",
+      "name": "Quyết định thể loại văn phong"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Lấy dữ liệu từ node Đọc nội dung\nconst binaryData = items[0].binary.data;\nconst fullText = Buffer.from(binaryData.data, 'base64').toString('utf-8');\n\n// --- CẤU HÌNH ---\nconst TARGET_CHUNK_SIZE = 1000; // Độ dài mong muốn\n// ----------------\n\nconst chunks = [];\nlet currentPos = 0;\n\nwhile (currentPos < fullText.length) {\n  let endPos = currentPos + TARGET_CHUNK_SIZE;\n\n  // Nếu đoạn còn lại ngắn hơn target thì lấy nốt\n  if (endPos >= fullText.length) {\n    endPos = fullText.length;\n  } else {\n    // --- THUẬT TOÁN TÌM ĐIỂM CẮT AN TOÀN (SMART SPLIT) ---\n    // Thay vì cắt bừa, ta sẽ lùi lại để tìm dấu chấm câu.\n    // Mục tiêu: Không bao giờ cắt giữa chừng một câu.\n    \n    let safeSpot = -1;\n    // Chỉ lùi tối đa 300 ký tự để tìm dấu chấm, nếu câu quá dài thì đành chịu\n    const lookBackLimit = 300; \n    \n    // Quét ngược từ điểm cắt dự kiến về phía trước\n    for (let i = 0; i < lookBackLimit; i++) {\n      const checkPos = endPos - i;\n      const char = fullText[checkPos];\n      \n      // CHỈ CẮT KHI GẶP: Dấu chấm (.), Xuống dòng (\\n), Chấm than (!), Hỏi chấm (?)\n      // Tuyệt đối KHÔNG cắt ở dấu cách (' ')\n      if (char === '.' || char === '\\n' || char === '!' || char === '?' || char === '”' || char === '\"') {\n        safeSpot = checkPos + 1; // +1 để lấy luôn cả dấu câu đó\n        break;\n      }\n    }\n\n    // Nếu tìm thấy dấu chấm thì cắt tại đó\n    if (safeSpot !== -1) {\n      endPos = safeSpot;\n    } \n    // Nếu đen đủi câu văn dài quá 1300 chữ không có dấu chấm nào (hiếm)\n    // Thì buộc phải cắt tại dấu cách gần nhất để đỡ gãy từ\n    else {\n       for (let i = 0; i < 100; i++) {\n          if (fullText[endPos - i] === ' ') {\n             endPos = endPos - i;\n             break;\n          }\n       }\n    }\n  }\n\n  const chunkText = fullText.substring(currentPos, endPos).trim();\n  \n  if (chunkText.length > 0) {\n    chunks.push({\n      json: { \n          chunk_text: chunkText, \n          index: chunks.length\n      }\n    });\n  }\n  \n  // Đặt con trỏ bắt đầu cho đoạn tiếp theo\n  currentPos = endPos;\n}\n\nreturn chunks;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        -352
+      ],
+      "id": "583b50ef-f930-42ca-b032-2b17abd1ff62",
+      "name": "Chia nhỏ"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b0deff51-4a69-4b85-a0c1-777620d596e5",
+              "leftValue": "={{ $json.path }}",
+              "rightValue": ".txt",
+              "operator": {
+                "type": "string",
+                "operation": "endsWith"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1296,
+        -32
+      ],
+      "id": "eb8306f6-8b73-45ed-9187-21b9e5ce9039",
+      "name": "Kiểm tra đuôi"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Lấy đường dẫn gốc từ node Trigger (để đảm bảo không bị mất dữ liệu)\n// Lưu ý: Đảm bảo tên node trigger của bạn đúng là 'Local File Trigger'\nconst oldPath = $('Local File Trigger').first().json.path;\n\n// Tạo đường dẫn mới (Pandoc sẽ thêm đuôi .txt vào file gốc)\nconst newPath = oldPath + \".txt\";\n\nreturn [{\n    json: {\n        path: newPath\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -928,
+        208
+      ],
+      "id": "e88191d3-d4c2-4c28-9afa-49d4c30c1df1",
+      "name": "Đổi địa chỉ file"
+    },
+    {
+      "parameters": {
+        "command": "=pandoc \"{{ $json.path }}\" -t plain -o \"{{ $json.path }}.txt\""
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -1120,
+        208
+      ],
+      "id": "2ed3532b-f66c-4b5b-9762-d37d35d193d3",
+      "name": "Đổi đuôi file"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        368,
+        -64
+      ],
+      "id": "973820ae-9bc7-4c36-9a5b-8d32e8c10fa3",
+      "name": "Kết hợp văn phong và nội dung"
+    },
+    {
+      "parameters": {
+        "jsCode": "// BƯỚC 1: Lấy dữ liệu từ node Dịch\nconst items = $('Dịch').all(); \n\n// BƯỚC 2: Sắp xếp\nitems.sort((a, b) => {\n    const indexA = a.json.index || 0;\n    const indexB = b.json.index || 0;\n    return indexA - indexB;\n});\n\nlet fullBook = \"\";\n\n// BƯỚC 3: Ghép nối (QUAN TRỌNG: Sửa đường dẫn lấy content)\nfor (const item of items) {\n    // API Ollama trả về nội dung trong json.message.content\n    const content = item.json.message ? item.json.message.content : \"\";\n    \n    if (content) {\n        fullBook += content + \"\\n\\n\"; \n    }\n}\n\nreturn [{\n    json: {\n        translated_content: fullBook\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1264,
+        -80
+      ],
+      "id": "21c9d92e-c31a-4c53-a7c5-c1b9e6d6dc26",
+      "name": "Ghép lại"
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "=D:/N8n_book_translator/Output/{{ $('Local File Trigger').first().json.path.split('\\\\').pop().split('/').pop().replace(/\\.[^/.]+$/, \"\") }}_translated.txt",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        1664,
+        -80
+      ],
+      "id": "f677d721-a83c-4973-a8c3-0569093f5a5f",
+      "name": "Lưu file"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        608,
+        -64
+      ],
+      "id": "b37c6961-b3c0-4ae3-ac17-249a60976f52",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        768,
+        96
+      ],
+      "id": "790d9356-b7c4-4625-8f7a-d378fa6d3cc8",
+      "name": "Wait",
+      "webhookId": "ddbd6049-9ba6-4025-ad29-11e03d1a5905"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:11434/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  {\n    \"model\": \"qwen3:14b\",\n    \"messages\": [\n      {\n        \"role\": \"user\",\n        \"content\": \"Bạn là một trợ lý phân loại văn học.\\nHãy đọc đoạn văn bản mẫu dưới đây và xác định thể loại chính của nó.\\nChỉ trả về DUY NHẤT một từ khóa trong danh sách sau: [KIEMHIEP, NGONTINH, KINHDOANH, KHOAHOC, KHAC].\\nTuyệt đối không giải thích gì thêm.\\n\\nVăn bản mẫu:\\n\" + $('Lấy mẫu').first().json.sample_text\n      }\n    ],\n    \"stream\": false\n  }\n}}",
+        "options": {
+          "timeout": 28800000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -96,
+        -48
+      ],
+      "id": "43470632-97f2-40d0-8093-2085974f12ff",
+      "name": "Xác định thể loại"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:11434/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  (\n    {\n      \"model\": \"qwen3:14b\",\n      \"messages\": [\n        {\n          \"role\": \"system\",\n          // PHẦN 1: GỌI SYSTEM PROMPT TỪ NODE QUYẾT ĐỊNH\n          \"content\": $('Quyết định thể loại văn phong').first().json.system_prompt + \n          \n          // PHẦN 2: CHÈN TỪ ĐIỂN TỪ NODE TẠO TỪ ĐIỂN\n          \"\\n\\n### BẮT BUỘC TUÂN THỦ TỪ ĐIỂN (GLOSSARY):\\n\" + \n          $('Tạo từ điển').first().json.message.content +\n\n          // PHẦN 3: LỆNH TĂNG CƯỜNG (Để dịch kỹ nhất)\n          \"\\n\\n### YÊU CẦU DỊCH THUẬT NÂNG CAO:\\n\" +\n          \"1. Dịch CHI TIẾT từng câu, tuyệt đối KHÔNG được tóm tắt hay bỏ sót ý.\\n\" +\n          \"2. Giữ nguyên sắc thái biểu cảm, các thán từ, mô tả nội tâm của nhân vật.\\n\" +\n          \"3. Nếu gặp thơ ca hoặc câu đối, hãy dịch sao cho vần điệu hoặc giữ nguyên Hán Việt nếu cần.\\n\" +\n          \"4. Văn phong phải trôi chảy, tự nhiên như người bản xứ viết.\"\n        },\n        {\n          \"role\": \"user\",\n          \"content\": \"Dịch đoạn văn bản sau sang tiếng Việt:\\n\\n\" + $json.chunk_text\n        }\n      ],\n      \"stream\": false,\n      \"options\": {\n         \"timeout\": 28800000 // 8 tiếng\n      }\n    }\n  )\n}}",
+        "options": {
+          "timeout": 28800000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        960,
+        96
+      ],
+      "id": "7191d7da-3142-4885-8451-01ea38c75332",
+      "name": "Dịch"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Lấy nội dung truyện từ node trước\n// (Nếu node trước tên khác \"Ghép lại\" thì sửa trong dấu ngoặc, nhưng thường là tự nhận)\nconst textContent = $input.first().json.translated_content;\n\n// 2. Mã hóa nội dung thành dạng file (Binary Base64)\nconst binaryData = Buffer.from(textContent, 'utf8').toString('base64');\n\n// 3. Trả về đúng định dạng để node Lưu File hiểu\nreturn [\n  {\n    json: {\n        success: true // Báo thành công\n    },\n    binary: {\n      data: { // Tên biến file là \"data\"\n        data: binaryData,\n        mimeType: 'text/plain',\n        fileExtension: 'txt',\n        fileName: 'truyen_dich.txt'\n      }\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1472,
+        -80
+      ],
+      "id": "047f10d8-47eb-418e-9946-3351ef575732",
+      "name": "Chuyển dạng file"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:11434/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  {\n    \"model\": \"qwen3:14b\",\n    \"messages\": [\n      {\n        \"role\": \"user\",\n        \"content\": \"Hãy phân tích đoạn văn sau và liệt kê các Tên Riêng (Nhân vật, Địa danh, Môn phái, Chiêu thức) quan trọng nhất để làm Từ Điển dịch thuật.\\n\\nĐịnh dạng trả về: Chỉ liệt kê dạng text, mỗi từ một dòng: Tên Gốc - Tên Hán Việt.\\nVí dụ:\\nLi Feng - Lý Phong\\nAzure Dragon - Thanh Long\\n\\nTuyệt đối không giải thích gì thêm.\\n\\nNội dung:\\n\" + $('Lấy mẫu').first().json.sample_text\n      }\n    ],\n    \"stream\": false,\n    \"options\": {\n       \"num_predict\": 3000\n    }\n  }\n}}",
+        "options": {
+          "timeout": 3600000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -272,
+        -48
+      ],
+      "id": "504ac9c1-df37-4c8d-aa28-4efd1496310e",
+      "name": "Tạo từ điển"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Local File Trigger": {
+      "main": [
+        [
+          {
+            "node": "Kiểm tra đuôi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lấy mẫu": {
+      "main": [
+        [
+          {
+            "node": "Tạo từ điển",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Đọc nội dung": {
+      "main": [
+        [
+          {
+            "node": "Lấy mẫu",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Chia nhỏ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chia nhỏ": {
+      "main": [
+        [
+          {
+            "node": "Kết hợp văn phong và nội dung",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Kiểm tra đuôi": {
+      "main": [
+        [
+          {
+            "node": "Đọc nội dung",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Đổi đuôi file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Đổi địa chỉ file": {
+      "main": [
+        [
+          {
+            "node": "Đọc nội dung",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Đổi đuôi file": {
+      "main": [
+        [
+          {
+            "node": "Đổi địa chỉ file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quyết định thể loại văn phong": {
+      "main": [
+        [
+          {
+            "node": "Kết hợp văn phong và nội dung",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Kết hợp văn phong và nội dung": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ghép lại": {
+      "main": [
+        [
+          {
+            "node": "Chuyển dạng file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lưu file": {
+      "main": [
+        []
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Ghép lại",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Dịch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Xác định thể loại": {
+      "main": [
+        [
+          {
+            "node": "Quyết định thể loại văn phong",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dịch": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chuyển dạng file": {
+      "main": [
+        [
+          {
+            "node": "Lưu file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tạo từ điển": {
+      "main": [
+        [
+          {
+            "node": "Xác định thể loại",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "d5978edf-b616-4289-8936-c1292d3bd3bb",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "50a355daa6e8e5d372113cb0763e3abcc694788f9449017d8c65b1c09f570d45"
+  },
+  "id": "WNz4Q1pp8QUXh5Sz",
+  "tags": []
+}
