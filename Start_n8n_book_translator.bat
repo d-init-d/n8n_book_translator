@@ -96,13 +96,16 @@ echo   De thay doi thu muc Input/Output:
 echo   Hay chay file "Reset-Settings.bat"
 echo ========================================================
 echo.
-
 where n8n >nul 2>nul
 if %errorlevel% neq 0 (
     echo [LOI] Chua cai n8n. Vui long chay file Setup truoc.
     pause
     exit
 )
+
+:: --- MO TRINH DUYET TU DONG ---
+echo [-] Dang mo giao dien n8n tren trinh duyet...
+start "" "http://localhost:5678"
 
 :: Lenh nay se treo cua so o day mai mai de n8n chay
 n8n start
