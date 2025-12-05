@@ -10,7 +10,9 @@ if %errorLevel% neq 0 (
     echo [!] Chuong trinh can quyen Admin.
     echo [i] Dang khoi dong lai voi quyen Admin...
     :: Dung /k de giu cua so neu co loi
-    powershell -Command "Start-Process cmd -ArgumentList '/k cd /d \"%~dp0\" && \"%~f0\"' -Verb RunAs"
+    set "batchPath=%~f0"
+    set "batchDir=%~dp0"
+    powershell -Command "Start-Process -FilePath '%batchPath%' -WorkingDirectory '%batchDir%' -Verb RunAs"
     exit
 )
 
