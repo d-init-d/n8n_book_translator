@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 title SETUP - N8N Book Translator (FLAT MODE)
 color 0B
 setlocal enabledelayedexpansion
@@ -9,7 +10,7 @@ if %errorLevel% neq 0 (
     echo [!] Chuong trinh can quyen Admin.
     echo [i] Dang khoi dong lai voi quyen Admin...
     :: Dung /k de giu cua so neu co loi
-    powershell -Command "Start-Process cmd -ArgumentList '/k \"\"%~f0\"\"' -Verb RunAs"
+    powershell -Command "Start-Process cmd -ArgumentList '/k cd /d \"%~dp0\" && \"%~f0\"' -Verb RunAs"
     exit
 )
 
