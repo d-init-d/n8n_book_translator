@@ -9,11 +9,12 @@ net session >nul 2>&1
 if %errorLevel% neq 0 (
     echo [!] Chuong trinh can quyen Admin.
     echo [i] Dang khoi dong lai voi quyen Admin...
-    :: Dung /k de giu cua so neu co loi
-    set "batchPath=%~f0"
-    set "batchDir=%~dp0"
-    powershell -Command "Start-Process -FilePath '%batchPath%' -WorkingDirectory '%batchDir%' -Verb RunAs"
-    exit
+    :: Tao file VBS tam de xin quyen admin (dung random de tranh conflict)
+    set "vbsFile=%temp%\getadmin_%random%%random%.vbs"
+    echo Set UAC = CreateObject^("Shell.Application"^) > "!vbsFile!"
+    echo UAC.ShellExecute "%~f0", "", "%~dp0", "runas", 1 >> "!vbsFile!"
+    wscript "!vbsFile!"
+    exit /b
 )
 
 :: --- 2. THIET LAP MOI TRUONG ---
